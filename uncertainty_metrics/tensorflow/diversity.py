@@ -53,7 +53,7 @@ def double_fault(logits_1, logits_2, labels):
   labels_at_idx = tf.gather(labels, fault_1_idx)
 
   double_faults = preds_2_at_idx != labels_at_idx
-  double_faults = tf.cast(double_faults, tf.float32)
+  double_faults = tf.cast(double_faults, tf.float32) / preds_1.shape[0]
   return tf.reduce_mean(double_faults)
 
 
