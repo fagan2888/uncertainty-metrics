@@ -85,6 +85,16 @@ class ExpectedCalibrationError(tf.keras.metrics.Metric):
     self.counts = self.add_weight(
         "counts", shape=(num_bins,), initializer=tf.zeros_initializer)
 
+  @staticmethod
+  def _compute_pred_labels(probabilities):
+    """Compute predicted labels given normalized class probabilities."""
+    return tf.math.argmax(probabilities, axis=-1)
+
+  @staticmethod
+  def _compute_pred_probs(probabilities):
+    """Compute predicted probabilities given normalized class probabilities."""
+    return tf.math.reduce_max(probabilities, axis=-1)
+
   def update_state(self,
                    labels,
                    probabilities,
@@ -129,8 +139,8 @@ class ExpectedCalibrationError(tf.keras.metrics.Metric):
         lambda: tf.concat([1. - probabilities, probabilities], axis=-1)[:, -k:],
         lambda: probabilities)
 
-    pred_labels = tf.math.argmax(probabilities, axis=-1)
-    pred_probs = tf.math.reduce_max(probabilities, axis=-1)
+    pred_labels = self._compute_pred_labels(probabilities)
+    pred_probs = self._compute_pred_probs(probabilities)
     correct_preds = tf.math.equal(pred_labels,
                                   tf.cast(labels, pred_labels.dtype))
     correct_preds = tf.cast(correct_preds, self.dtype)
