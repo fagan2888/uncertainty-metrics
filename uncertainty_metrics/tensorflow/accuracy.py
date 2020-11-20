@@ -68,43 +68,32 @@ class OracleCollaborativeAccuracy(calibration.ExpectedCalibrationError):
     """
     super(OracleCollaborativeAccuracy, self).__init__(num_bins, name, dtype)
     self.fraction = fraction
-    self.collab_correct_sums = self.add_weight(
-        "collab_correct_sums",
-        shape=(num_bins,),
-        initializer=tf.zeros_initializer)
 
   def result(self):
     """Computes the expected calibration error."""
-    num_total_example = tf.reduce_sum(self.counts)
+    num_total_examples = tf.reduce_sum(self.counts)
     num_oracle_examples = tf.cast(
-        int(num_total_example * self.fraction), self.dtype)
-    # TODO(lzi): compute the expected number of accurate predictions
-    collab_correct_sums = []
-    num_oracle_examples_so_far = 0.0
-    for i in range(self.num_bins):
-      cur_bin_counts = self.counts[i]
-      cur_bin_num_correct = self.correct_sums[i]
-      if num_oracle_examples_so_far + cur_bin_counts <= num_oracle_examples:
-        # Send all examples in the current bin to the oracle.
-        cur_bin_num_correct = cur_bin_counts
-        num_oracle_examples_so_far += cur_bin_num_correct
-      elif num_oracle_examples_so_far < num_oracle_examples:
-        # Send num_correct_oracle examples in the current bin to oracle,
-        # and have model to predict the rest.
-        cur_bin_accuracy = cur_bin_num_correct / cur_bin_counts
-        num_correct_oracle = tf.cast(
-            num_oracle_examples - num_oracle_examples_so_far, self.dtype)
-        num_correct_model = (cur_bin_counts -
-                             num_correct_oracle) * cur_bin_accuracy
-        cur_bin_num_correct = num_correct_oracle + num_correct_model
-        num_oracle_examples_so_far = num_oracle_examples
+        tf.floor(num_total_examples * self.fraction), self.dtype)
 
-      collab_correct_sums.append(cur_bin_num_correct)
+    non_empty_bins = self.counts != 0
+    counts = tf.boolean_mask(self.counts, non_empty_bins)
+    correct_sums = tf.boolean_mask(self.correct_sums, non_empty_bins)
+    cum_counts = tf.cumsum(counts)
 
-    self.collab_correct_sums = tf.stack(collab_correct_sums)
+    # Identify the final bin the oracle sees examples from, and the remaining
+    # number of predictions it can make on that bin.
+    final_oracle_bin = tf.cast(
+        tf.argmax(cum_counts > num_oracle_examples), tf.int32)
+    oracle_predictions_used = tf.cond(final_oracle_bin > 0,
+                                      lambda: cum_counts[final_oracle_bin - 1],
+                                      lambda: 0.)
+    remaining_oracle_predictions = num_oracle_examples - oracle_predictions_used
 
-    non_empty = tf.math.not_equal(self.counts, 0)
-    counts = tf.boolean_mask(self.counts, non_empty)
-    collab_correct_sums = tf.boolean_mask(self.collab_correct_sums, non_empty)
+    expected_correct = num_oracle_examples
+    # Add expected number of correct examples from the final bin..
+    expected_correct += (
+        correct_sums[final_oracle_bin] / counts[final_oracle_bin] *
+        (counts[final_oracle_bin] - remaining_oracle_predictions))
+    expected_correct += tf.reduce_sum(correct_sums[final_oracle_bin + 1:])
 
-    return tf.reduce_sum(collab_correct_sums) / tf.reduce_sum(counts)
+    return expected_correct / num_total_examples
